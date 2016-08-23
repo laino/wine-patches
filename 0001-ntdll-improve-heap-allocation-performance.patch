@@ -1,0 +1,705 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
+Date: Fri, 19 Aug 2016 11:01:30 +0200
+Subject: [PATCH 1/3] ntdll: improve heap allocation performance
+
+- Automatically balancing free lists: It is impossible
+  to tune free list sizes (manually) for every application, since
+  every application has different allocation patterns/sizes.
+  Some applications end up having over 10000 elements
+  in one free list, destroying performance and oftentimes
+  causing HEAP_FindFreeBlock to account for more than 50%
+  of all CPU time consumed by such applications. To combat
+  this, once free list balance becomes very bad, they are
+  now automatically balanced with their neighbours.
+
+- Added a fast case to skip to the next free list when the
+  current list doesn't contain any large-enough block:
+  This benefits applications who free blocks and then
+  immediately request slightly larger blocks afterwards.
+
+- Cleanups and minor fixes:
+    - When allocating a subheap we don't actually need to reserve space
+      for another free arena, since the minimum shrink size is enough
+      to fit that arena in HEAP_ShrinkBlock.
+    - Flags that are set when a block becomes a free arena
+      should be cleared in functions doing the opposite
+      operation, not in some unrelated function, to make
+      the whole process easier to understand
+      (FREE and PREV_FREE flags).
+
+Signed-off-by: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
+---
+ dlls/ntdll/heap.c | 456 ++++++++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 373 insertions(+), 83 deletions(-)
+
+diff --git a/dlls/ntdll/heap.c b/dlls/ntdll/heap.c
+index f928ebf..e0ffdfe 100644
+--- a/dlls/ntdll/heap.c
++++ b/dlls/ntdll/heap.c
+@@ -105,7 +105,8 @@ C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
+ /* minimum data size (without arenas) of an allocated block */
+ /* make sure that it's larger than a free list entry */
+ #define HEAP_MIN_DATA_SIZE    ROUND_SIZE(2 * sizeof(struct list))
+-/* minimum size that must remain to shrink an allocated block */
++/* minimum size by which an allocated block must be shrunk */
++/* must be enough to fit the free block that will be created after it */
+ #define HEAP_MIN_SHRINK_SIZE  (HEAP_MIN_DATA_SIZE+sizeof(ARENA_FREE))
+ /* minimum size to start allocating large blocks */
+ #define HEAP_MIN_LARGE_BLOCK_SIZE  0x7f000
+@@ -113,17 +114,46 @@ C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
+ #define HEAP_TAIL_EXTRA_SIZE(flags) \
+     ((flags & HEAP_TAIL_CHECKING_ENABLED) || RUNNING_ON_VALGRIND ? ALIGNMENT : 0)
+ 
+-/* Max size of the blocks on the free lists */
+-static const SIZE_T HEAP_freeListSizes[] =
++static const DWORD HEAP_defaultFreeListSizes[] =
+ {
+-    0x10, 0x20, 0x30, 0x40, 0x60, 0x80, 0x100, 0x200, 0x400, 0x1000, ~0UL
++    0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x80, 0xA0, 0xC0,
++    0xE0, 0x100, 0x140, 0x180, 0x1C0, 0x200, 0x400, 0x1000,
++    0x2000, 0x3000, 0x5000, 0xA000, 0xF000, 0xA0000, 0xA00000,
++    0xA000000, ~0U
+ };
+-#define HEAP_NB_FREE_LISTS  (sizeof(HEAP_freeListSizes)/sizeof(HEAP_freeListSizes[0]))
+-
+-typedef union
++#define HEAP_NB_FREE_LISTS  (sizeof(HEAP_defaultFreeListSizes)/sizeof(HEAP_defaultFreeListSizes[0]))
++
++/* minimum elements in a free list to consider balancing it with neigbours */
++#define HEAP_FREELIST_BALANCE_COUNT_THRESH 2048
++/* minimum difference between a free list and one of its neighbours to try to
++ * balance them */
++#define HEAP_FREELIST_BALANCE_DIFF_THRESH 2048
++/* Amount to add to DIFF_THRESH for every time the bigger list
++ * exeeds COUNT_THRESH */
++#define HEAP_FREELIST_BALANCE_DIFF_SCALING 1024
++/* when the other list is bigger after balancing, this is the minimum
++ * improvement in balance required for the change to be accepted.
++ * Needed to prevent lists from 'snapping back and forth' */
++#define HEAP_FREELIST_MIN_BALANCE_IMPROVEMENT 512
++
++/* calculates a new size for a free list when moving towards _size. */
++#define HEAP_FREELIST_SIZE_STEP_TOWARDS(list, _size) \
++  (((SIZE_T)list->size * (SIZE_T)list->granularity + (SIZE_T)_size) \
++   / ((SIZE_T)list->granularity + 1UL)) & ~(ALIGNMENT - 1);
++
++#define HEAP_FREELIST_MAX_GRANULARITY (0xFU)
++
++#define HEAP_FREELIST_FLAG_DONT_RESIZE        0x3
++#define HEAP_FREELIST_FLAG_DONT_RESIZE_UP     0x1
++#define HEAP_FREELIST_FLAG_DONT_RESIZE_DOWN   0x2
++typedef struct tagFREELISTENTRY
+ {
+     ARENA_FREE  arena;
+-    void       *alignment[4];
++    DWORD       count;
++    DWORD       size;
++    DWORD       flags;
++    DWORD       largest_arena;
++    DWORD       granularity;
+ } FREE_LIST_ENTRY;
+ 
+ struct tagHEAP;
+@@ -157,7 +187,7 @@ typedef struct tagHEAP
+     DWORD            pending_pos;   /* Position in pending free requests ring */
+     ARENA_INUSE    **pending_free;  /* Ring buffer for pending free requests */
+     RTL_CRITICAL_SECTION critSection; /* Critical section for serialization */
+-    FREE_LIST_ENTRY *freeList;      /* Free lists */
++    FREE_LIST_ENTRY  freeList[HEAP_NB_FREE_LISTS]; /* Free lists */
+ } HEAP;
+ 
+ #define HEAP_MAGIC       ((DWORD)('H' | ('E'<<8) | ('A'<<16) | ('P'<<24)))
+@@ -299,12 +329,12 @@ static void subheap_notify_free_all(SUBHEAP const *subheap)
+ 
+ /* locate a free list entry of the appropriate size */
+ /* size is the size of the whole block including the arena header */
+-static inline unsigned int get_freelist_index( SIZE_T size )
++static inline unsigned int get_freelist_index( HEAP *heap, SIZE_T size )
+ {
+     unsigned int i;
+ 
+-    size -= sizeof(ARENA_FREE);
+-    for (i = 0; i < HEAP_NB_FREE_LISTS - 1; i++) if (size <= HEAP_freeListSizes[i]) break;
++    for (i = 0; i < HEAP_NB_FREE_LISTS - 1; i++) if (size <= heap->freeList[i].size) break;
++
+     return i;
+ }
+ 
+@@ -337,8 +367,8 @@ static void HEAP_Dump( HEAP *heap )
+ 
+     DPRINTF( "\nFree lists:\n Block   Stat   Size    Id\n" );
+     for (i = 0; i < HEAP_NB_FREE_LISTS; i++)
+-        DPRINTF( "%p free %08lx prev=%p next=%p\n",
+-                 &heap->freeList[i].arena, HEAP_freeListSizes[i],
++        DPRINTF( "%p free %u index=%u count=%u prev=%p next=%p\n",
++                 &heap->freeList[i].arena, heap->freeList[i].size, i, heap->freeList[i].count,
+                  LIST_ENTRY( heap->freeList[i].arena.entry.prev, ARENA_FREE, entry ),
+                  LIST_ENTRY( heap->freeList[i].arena.entry.next, ARENA_FREE, entry ));
+ 
+@@ -385,8 +415,8 @@ static void HEAP_Dump( HEAP *heap )
+             }
+         }
+         DPRINTF( "\nTotal: Size=%08lx Committed=%08lx Free=%08lx Used=%08lx Arenas=%08lx (%ld%%)\n\n",
+-	      subheap->size, subheap->commitSize, freeSize, usedSize,
+-	      arenaSize, (arenaSize * 100) / subheap->size );
++                  subheap->size, subheap->commitSize, freeSize, usedSize,
++                  arenaSize, (arenaSize * 100) / subheap->size );
+     }
+ }
+ 
+@@ -435,8 +465,8 @@ static void HEAP_DumpEntry( LPPROCESS_HEAP_ENTRY entry )
+ /***********************************************************************
+  *           HEAP_GetPtr
+  * RETURNS
+- *	Pointer to the heap
+- *	NULL: Failure
++ *  Pointer to the heap
++ *  NULL: Failure
+  */
+ static HEAP *HEAP_GetPtr(
+              HANDLE heap /* [in] Handle to the heap */
+@@ -459,28 +489,273 @@ static HEAP *HEAP_GetPtr(
+     return heapPtr;
+ }
+ 
++static inline BOOL lists_can_balance( FREE_LIST_ENTRY *listA, FREE_LIST_ENTRY *listB )
++{
++    DWORD minDiff;
++    FREE_LIST_ENTRY *tmp;
+ 
+-/***********************************************************************
+- *           HEAP_InsertFreeBlock
++    /* Make it so listA is always the smaller list */
++    if (listA->count > listB->count)
++    {
++        if (listA->flags & HEAP_FREELIST_FLAG_DONT_RESIZE_DOWN)
++            return FALSE;
++
++        tmp = listB;
++        listB = listA;
++        listA = tmp;
++    }
++    else if (listA->flags & HEAP_FREELIST_FLAG_DONT_RESIZE_UP)
++        return FALSE;
++
++    minDiff = HEAP_FREELIST_BALANCE_DIFF_THRESH +
++              HEAP_FREELIST_BALANCE_DIFF_SCALING *
++              (listB->count / HEAP_FREELIST_BALANCE_COUNT_THRESH - 1);
++
++    return listB->count - listA->count >= minDiff;
++}
++
++/*************************************************************************
++ *           freelist_balance
+  *
+- * Insert a free block into the free list.
++ * Balance the list at freelistIndex with the list at freelistIndex+1
++ *
++ * RETURNS
++ *  Number of moved entries.
+  */
+-static inline void HEAP_InsertFreeBlock( HEAP *heap, ARENA_FREE *pArena, BOOL last )
++static DWORD freelist_balance ( HEAP *heap, unsigned int freelistIndex )
+ {
+-    FREE_LIST_ENTRY *pEntry = heap->freeList + get_freelist_index( pArena->size + sizeof(*pArena) );
+-    if (last)
++
++    ARENA_FREE *pArena;
++    struct list *insertAfter, *ptr,
++                *danglingListTail = NULL,
++                *danglingListHead = NULL;
++
++    int count;
++    BOOL grow;
++    DWORD arenaSize, newSize, prevListSize;
++
++    FREE_LIST_ENTRY *listA = &heap->freeList[freelistIndex];
++    FREE_LIST_ENTRY *listB = &heap->freeList[freelistIndex + 1];
++
++    if (!lists_can_balance(listA, listB))
++        return 0;
++
++    prevListSize = 0;
++
++    if (freelistIndex != 0)
++        prevListSize = heap->freeList[freelistIndex - 1].size;
++
++    if (listA->count > listB->count)
+     {
+-        /* insert at end of free list, i.e. before the next free list entry */
+-        pEntry++;
+-        if (pEntry == &heap->freeList[HEAP_NB_FREE_LISTS]) pEntry = heap->freeList;
+-        list_add_before( &pEntry->arena.entry, &pArena->entry );
++        grow = FALSE;
++        newSize = HEAP_FREELIST_SIZE_STEP_TOWARDS(listA, prevListSize);
++
++        insertAfter = &listB->arena.entry;
++        ptr = &listA->arena.entry;
+     }
+     else
+     {
+-        /* insert at head of free list */
+-        list_add_after( &pEntry->arena.entry, &pArena->entry );
++        grow = TRUE;
++        newSize = HEAP_FREELIST_SIZE_STEP_TOWARDS(listA, listB->size);
++
++        insertAfter = listB->arena.entry.prev;
++        ptr = &listB->arena.entry;
++    }
++
++    if (newSize == listA->size)
++    {
++        if (grow) newSize += ALIGNMENT;
++        else      newSize -= ALIGNMENT;
++    }
++
++    /* lists can't (and should not) be balanced any further */
++    if (newSize <= (prevListSize & ARENA_SIZE_MASK) ||
++        newSize >= (listB->size & ARENA_SIZE_MASK))
++    {
++
++        if (grow) listA->flags |= HEAP_FREELIST_FLAG_DONT_RESIZE_UP;
++        else      listA->flags |= HEAP_FREELIST_FLAG_DONT_RESIZE_DOWN;
++
++        return 0;
++    }
++
++    /* reached minimum step size, set max granularity
++     * to set appropriate flags later. */
++    if (newSize + ALIGNMENT == listA->size ||
++        newSize - ALIGNMENT == listA->size)
++    {
++        listA->granularity = HEAP_FREELIST_MAX_GRANULARITY;
+     }
++
++    count = 0;
++
++    while (1)
++    {
++        ptr = ptr->next;
++
++        pArena = LIST_ENTRY( ptr, ARENA_FREE, entry );
++
++        arenaSize = pArena->size & ARENA_SIZE_MASK;
++
++        if (arenaSize == 0) break;
++
++        if ( (grow && arenaSize <= newSize) || (!grow && arenaSize > newSize))
++        {
++            list_remove(ptr);
++
++            if (danglingListTail)
++            {
++                danglingListTail->next = ptr;
++                ptr->prev = danglingListTail;
++            } else {
++                danglingListHead = ptr;
++            }
++
++            danglingListTail = ptr;
++
++            count++;
++        }
++
++    }
++
++    TRACE("BEFORE (%u / %u): %u / %u (thresh %u)\n",
++          freelistIndex, freelistIndex + 1, listA->count, listB->count, listA->size);
++
++    if (count)
++    {
++        /* If we didn't make things significantly better, undo changes
++         * and increase granularity. */
++        if (count + HEAP_FREELIST_MIN_BALANCE_IMPROVEMENT >=
++            max(listA->count, listB->count) - min(listA->count, listB->count))
++        {
++
++            /* insert back at list head */
++            danglingListTail->next = danglingListHead->prev->next;
++            danglingListTail->next->prev = danglingListTail;
++
++            danglingListHead->prev->next = danglingListHead;
++
++            if (listA->granularity >= HEAP_FREELIST_MAX_GRANULARITY)
++            {
++                if (grow) listA->flags |= HEAP_FREELIST_FLAG_DONT_RESIZE_UP;
++                else      listA->flags |= HEAP_FREELIST_FLAG_DONT_RESIZE_DOWN;
++            }
++            else listA->granularity = listA->granularity * 2 + 1;
++
++            TRACE("UNDO (%u / %u): %u / %u (thresh %u)\n",
++                   freelistIndex, freelistIndex + 1,
++                   listA->count + (grow ? count : -count),
++                   listB->count - (grow ? count : -count), newSize);
++
++            return 0;
++        }
++
++        /* Otherwise insert dangling list */
++        danglingListHead->prev = insertAfter;
++        danglingListTail->next = insertAfter->next;
++
++        insertAfter->next->prev = danglingListTail;
++        insertAfter->next = danglingListHead;
++
++        listA->count += grow ? count : -count;
++        listB->count -= grow ? count : -count;
++
++        listA->largest_arena = 0;
++    }
++
++    listA->size = newSize;
++    listA->granularity = 1;
++
++    TRACE("AFTER (%u / %u): %u / %u (thresh %u)\n",
++          freelistIndex, freelistIndex + 1, listA->count, listB->count, listA->size);
++
++    /* clear flags on neighbouring lists */
++    listB->flags &= ~HEAP_FREELIST_FLAG_DONT_RESIZE;
++
++    if (freelistIndex != 0)
++        heap->freeList[freelistIndex - 1].flags &= ~HEAP_FREELIST_FLAG_DONT_RESIZE;
++
++    return count;
++}
++
++
++/***********************************************************************
++ *           HEAP_InsertFreeBlock
++ *
++ * Insert a free block into the free list.
++ */
++static void HEAP_InsertFreeBlock( SUBHEAP *subheap, ARENA_FREE *pArena )
++{
++    char *pNext;
++    HEAP *heap = subheap->heap;
++    FREE_LIST_ENTRY *pEntry;
++
++    DWORD size = pArena->size & ARENA_SIZE_MASK;
++
++    unsigned int freelistIndex = get_freelist_index( heap, size );
++
++    pEntry = &heap->freeList[freelistIndex];
++    pEntry->count++;
++
+     pArena->size |= ARENA_FLAG_FREE;
++
++    /* insert at head of free list */
++    list_add_after( &pEntry->arena.entry, &pArena->entry );
++
++    /* Set the next block PREV_FREE flag and pointer */
++    pNext = (char *)(pArena + 1) + size;
++    if (pNext < (char *)subheap->base + subheap->size)
++    {
++        *(DWORD *) pNext |= ARENA_FLAG_PREV_FREE;
++        mark_block_initialized( (ARENA_FREE **)pNext - 1, sizeof( ARENA_FREE * ) );
++        *((ARENA_FREE **)pNext - 1) = pArena;
++    }
++
++    /* update largest_arena if we are currently keeping track of it or if this
++     * is the first element */
++    if (pEntry->count == 1 || (pEntry->largest_arena && size > pEntry->largest_arena))
++        pEntry->largest_arena = size;
++
++    /* Check whether we need to balance this free list with its neighbours */
++    if (pEntry->count < HEAP_FREELIST_BALANCE_COUNT_THRESH ||
++        freelistIndex + 1 == HEAP_NB_FREE_LISTS) return;
++
++    if (freelistIndex + 2 < HEAP_NB_FREE_LISTS &&
++        freelist_balance(heap, freelistIndex)) return;
++
++    if (freelistIndex > 0) freelist_balance(heap, freelistIndex - 1);
++}
++
++/***********************************************************************
++ *           HEAP_RemoveFreeBlock
++ *
++ * Remove a free block from the free list.
++ */
++static inline void HEAP_RemoveFreeBlock( SUBHEAP *subheap, ARENA_FREE *pArena )
++{
++    char *pNext;
++    DWORD size = pArena->size & ARENA_SIZE_MASK;
++    HEAP *heap = subheap->heap;
++
++    FREE_LIST_ENTRY *pEntry = &heap->freeList[get_freelist_index( heap, size )];
++    assert(pEntry->count);
++    pEntry->count--;
++
++    list_remove(&pArena->entry);
++
++    /* If the largest arena is removed, reset tracker to 0.
++     * Note that this will still happen if there are multiple arenas
++     * of the same size and the tracker will only be updated on
++     * the next miss in HEAP_FindFreeBlock */
++    if (pEntry->largest_arena == size)
++        pEntry->largest_arena = 0;
++
++    pArena->size &= ~ARENA_FLAG_FREE;
++
++    /* Clear next block PREV_FREE flag */
++    pNext = (char *)(pArena + 1) + size;
++    if (pNext < (char *)subheap->base + subheap->size)
++        *(DWORD *)pNext &= ~ARENA_FLAG_PREV_FREE;
+ }
+ 
+ 
+@@ -489,8 +764,8 @@ static inline void HEAP_InsertFreeBlock( HEAP *heap, ARENA_FREE *pArena, BOOL la
+  * Find the sub-heap containing a given address.
+  *
+  * RETURNS
+- *	Pointer: Success
+- *	NULL: Failure
++ *  Pointer: Success
++ *  NULL: Failure
+  */
+ static SUBHEAP *HEAP_FindSubHeap(
+                 const HEAP *heap, /* [in] Heap pointer */
+@@ -570,7 +845,6 @@ static void HEAP_CreateFreeBlock( SUBHEAP *subheap, void *ptr, SIZE_T size )
+ {
+     ARENA_FREE *pFree;
+     char *pEnd;
+-    BOOL last;
+     DWORD flags = subheap->heap->flags;
+ 
+     /* Create a free arena */
+@@ -592,26 +866,15 @@ static void HEAP_CreateFreeBlock( SUBHEAP *subheap, void *ptr, SIZE_T size )
+     {
+         /* Remove the next arena from the free list */
+         ARENA_FREE *pNext = (ARENA_FREE *)((char *)ptr + size);
+-        list_remove( &pNext->entry );
++        HEAP_RemoveFreeBlock( subheap, pNext );
+         size += (pNext->size & ARENA_SIZE_MASK) + sizeof(*pNext);
+         mark_block_free( pNext, sizeof(ARENA_FREE), flags );
+     }
+ 
+-    /* Set the next block PREV_FREE flag and pointer */
+-
+-    last = ((char *)ptr + size >= (char *)subheap->base + subheap->size);
+-    if (!last)
+-    {
+-        DWORD *pNext = (DWORD *)((char *)ptr + size);
+-        *pNext |= ARENA_FLAG_PREV_FREE;
+-        mark_block_initialized( (ARENA_FREE **)pNext - 1, sizeof( ARENA_FREE * ) );
+-        *((ARENA_FREE **)pNext - 1) = pFree;
+-    }
+-
+     /* Last, insert the new block into the free list */
+ 
+     pFree->size = size - sizeof(*pFree);
+-    HEAP_InsertFreeBlock( subheap->heap, pFree, last );
++    HEAP_InsertFreeBlock( subheap, pFree );
+ }
+ 
+ 
+@@ -647,7 +910,7 @@ static void HEAP_MakeInUseBlockFree( SUBHEAP *subheap, ARENA_INUSE *pArena )
+         pFree = *((ARENA_FREE **)pArena - 1);
+         size += (pFree->size & ARENA_SIZE_MASK) + sizeof(ARENA_FREE);
+         /* Remove it from the free list */
+-        list_remove( &pFree->entry );
++        HEAP_RemoveFreeBlock( subheap, pFree );
+     }
+     else pFree = (ARENA_FREE *)pArena;
+ 
+@@ -667,7 +930,7 @@ static void HEAP_MakeInUseBlockFree( SUBHEAP *subheap, ARENA_INUSE *pArena )
+ 
+         size = 0;
+         /* Remove the free block from the list */
+-        list_remove( &pFree->entry );
++        HEAP_RemoveFreeBlock( subheap, pFree );
+         /* Remove the subheap from the list */
+         list_remove( &subheap->entry );
+         /* Free the memory */
+@@ -693,16 +956,9 @@ static void HEAP_ShrinkBlock(SUBHEAP *subheap, ARENA_INUSE *pArena, SIZE_T size)
+     {
+         HEAP_CreateFreeBlock( subheap, (char *)(pArena + 1) + size,
+                               (pArena->size & ARENA_SIZE_MASK) - size );
+-	/* assign size plus previous arena flags */
++        /* assign size plus previous arena flags */
+         pArena->size = size | (pArena->size & ~ARENA_SIZE_MASK);
+     }
+-    else
+-    {
+-        /* Turn off PREV_FREE flag in next block */
+-        char *pNext = (char *)(pArena + 1) + (pArena->size & ARENA_SIZE_MASK);
+-        if (pNext < (char *)subheap->base + subheap->size)
+-            *(DWORD *)pNext &= ~ARENA_FLAG_PREV_FREE;
+-    }
+ }
+ 
+ 
+@@ -930,14 +1186,17 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
+ 
+         /* Build the free lists */
+ 
+-        heap->freeList = (FREE_LIST_ENTRY *)((char *)heap + subheap->headerSize);
+-        subheap->headerSize += HEAP_NB_FREE_LISTS * sizeof(FREE_LIST_ENTRY);
+         list_init( &heap->freeList[0].arena.entry );
+-        for (i = 0, pEntry = heap->freeList; i < HEAP_NB_FREE_LISTS; i++, pEntry++)
++        for (i = 0; i < HEAP_NB_FREE_LISTS; i++)
+         {
++            pEntry = &heap->freeList[i];
+             pEntry->arena.size = 0 | ARENA_FLAG_FREE;
+             pEntry->arena.magic = ARENA_FREE_MAGIC;
+-            if (i) list_add_after( &pEntry[-1].arena.entry, &pEntry->arena.entry );
++            pEntry->size = HEAP_defaultFreeListSizes[i] & ARENA_SIZE_MASK;
++            pEntry->count = 0;
++            pEntry->flags = 0;
++            pEntry->granularity = 1;
++            if (i) list_add_after( &heap->freeList[i-1].arena.entry, &pEntry->arena.entry );
+         }
+ 
+         /* Initialize critical section */
+@@ -991,27 +1250,64 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
+                                        SUBHEAP **ppSubHeap )
+ {
+     SUBHEAP *subheap;
+-    struct list *ptr;
++    struct list *ptr, *end;
+     SIZE_T total_size;
+-    FREE_LIST_ENTRY *pEntry = heap->freeList + get_freelist_index( size + sizeof(ARENA_INUSE) );
++
++    DWORD requested_size = size - sizeof(ARENA_FREE) + sizeof(ARENA_INUSE);
++    DWORD largest_arena = 0;
++
++    int freelistIndex = get_freelist_index( heap, requested_size );
++
++    FREE_LIST_ENTRY *pEntry = &heap->freeList[freelistIndex];
++
++    /* If we already know there's no large-enough block in this list,
++     * skip to the next one, where (if there's any block) the first
++     * block is guaranteed to be large enough. Making this O(1).
++     */
++    if (pEntry->largest_arena && pEntry->largest_arena < requested_size)
++    {
++        freelistIndex++;
++
++        if (freelistIndex == HEAP_NB_FREE_LISTS)
++            goto grow;
++
++        pEntry = &heap->freeList[freelistIndex];
++    }
+ 
+     /* Find a suitable free list, and in it find a block large enough */
+ 
++    end = &heap->freeList[0].arena.entry;
+     ptr = &pEntry->arena.entry;
+-    while ((ptr = list_next( &heap->freeList[0].arena.entry, ptr )))
++    while ((ptr = list_next( end, ptr )))
+     {
+         ARENA_FREE *pArena = LIST_ENTRY( ptr, ARENA_FREE, entry );
+-        SIZE_T arena_size = (pArena->size & ARENA_SIZE_MASK) +
+-                            sizeof(ARENA_FREE) - sizeof(ARENA_INUSE);
+-        if (arena_size >= size)
++        DWORD arena_size = pArena->size & ARENA_SIZE_MASK;
++
++        if (arena_size >= requested_size)
+         {
+             subheap = HEAP_FindSubHeap( heap, pArena );
+             if (!HEAP_Commit( subheap, (ARENA_INUSE *)pArena, size )) return NULL;
+             *ppSubHeap = subheap;
+             return pArena;
+         }
++
++        if (pEntry == NULL) continue;
++
++        if (arena_size == 0)
++        {
++            /* We reached the next free list and didn't manage
++             * to find any block large enough. Update largest_arena
++             * to keep this from happening again on subsequent runs. */
++            pEntry->largest_arena = largest_arena;
++            pEntry = NULL;
++            continue;
++        }
++
++        if (arena_size > largest_arena)
++            largest_arena = arena_size;
+     }
+ 
++grow:
+     /* If no block was found, attempt to grow the heap */
+ 
+     if (!(heap->flags & HEAP_GROWABLE))
+@@ -1019,12 +1315,8 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
+         WARN("Not enough space in heap %p for %08lx bytes\n", heap, size );
+         return NULL;
+     }
+-    /* make sure that we have a big enough size *committed* to fit another
+-     * last free arena in !
+-     * So just one heap struct, one first free arena which will eventually
+-     * get used, and a second free arena that might get assigned all remaining
+-     * free space in HEAP_ShrinkBlock() */
+-    total_size = size + ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE) + sizeof(ARENA_FREE);
++
++    total_size = size + ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE);
+     if (total_size < size) return NULL;  /* overflow */
+ 
+     if ((subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, total_size,
+@@ -1130,8 +1422,8 @@ static BOOL HEAP_ValidateFreeArena( SUBHEAP *subheap, ARENA_FREE *pArena )
+     /* Check that prev arena is free */
+     if (!(prev->size & ARENA_FLAG_FREE) || (prev->magic != ARENA_FREE_MAGIC))
+     {
+-	/* this often means that the prev arena got overwritten
+-	 * by a memory write before that prev arena */
++        /* this often means that the prev arena got overwritten
++         * by a memory write before that prev arena */
+         ERR("Heap %p: prev arena %p invalid for %p\n",
+             subheap->heap, prev, pArena );
+         return FALSE;
+@@ -1312,8 +1604,8 @@ static BOOL HEAP_ValidateInUseArena( const SUBHEAP *subheap, const ARENA_INUSE *
+  * Validates a block is a valid arena.
+  *
+  * RETURNS
+- *	TRUE: Success
+- *	FALSE: Failure
++ *  TRUE: Success
++ *  FALSE: Failure
+  */
+ static BOOL HEAP_IsRealArena( HEAP *heapPtr,   /* [in] ptr to the heap */
+               DWORD flags,   /* [in] Bit flags that control access during operation */
+@@ -1696,8 +1988,7 @@ PVOID WINAPI RtlAllocateHeap( HANDLE heap, ULONG flags, SIZE_T size )
+     }
+ 
+     /* Remove the arena from the free list */
+-
+-    list_remove( &pArena->entry );
++    HEAP_RemoveFreeBlock( subheap, pArena );
+ 
+     /* Build the in-use arena */
+ 
+@@ -1705,7 +1996,7 @@ PVOID WINAPI RtlAllocateHeap( HANDLE heap, ULONG flags, SIZE_T size )
+ 
+     /* in-use arena is smaller than free arena,
+      * so we have to add the difference to the size */
+-    pInUse->size  = (pInUse->size & ~ARENA_FLAG_FREE) + sizeof(ARENA_FREE) - sizeof(ARENA_INUSE);
++    pInUse->size  = pInUse->size + sizeof(ARENA_FREE) - sizeof(ARENA_INUSE);
+     pInUse->magic = ARENA_INUSE_MAGIC;
+ 
+     /* Shrink the block */
+@@ -1854,7 +2145,7 @@ PVOID WINAPI RtlReAllocateHeap( HANDLE heap, ULONG flags, PVOID ptr, SIZE_T size
+         {
+             /* The next block is free and large enough */
+             ARENA_FREE *pFree = (ARENA_FREE *)pNext;
+-            list_remove( &pFree->entry );
++            HEAP_RemoveFreeBlock( subheap, pFree );
+             pArena->size += (pFree->size & ARENA_SIZE_MASK) + sizeof(*pFree);
+             if (!HEAP_Commit( subheap, pArena, rounded_size )) goto oom;
+             notify_realloc( pArena + 1, oldActualSize, size );
+@@ -1872,10 +2163,9 @@ PVOID WINAPI RtlReAllocateHeap( HANDLE heap, ULONG flags, PVOID ptr, SIZE_T size
+ 
+             /* Build the in-use arena */
+ 
+-            list_remove( &pNew->entry );
++            HEAP_RemoveFreeBlock( newsubheap, pNew );
+             pInUse = (ARENA_INUSE *)pNew;
+-            pInUse->size = (pInUse->size & ~ARENA_FLAG_FREE)
+-                           + sizeof(ARENA_FREE) - sizeof(ARENA_INUSE);
++            pInUse->size = pInUse->size + sizeof(ARENA_FREE) - sizeof(ARENA_INUSE);
+             pInUse->magic = ARENA_INUSE_MAGIC;
+             HEAP_ShrinkBlock( newsubheap, pInUse, rounded_size );
+ 
+-- 
+2.9.3
+
