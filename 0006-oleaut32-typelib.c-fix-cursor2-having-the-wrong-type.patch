@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
+Date: Wed, 24 Aug 2016 19:56:00 +0200
+Subject: [PATCH 6/6] oleaut32/typelib.c: fix cursor2 having the wrong type
+
+---
+ dlls/oleaut32/typelib.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/oleaut32/typelib.c b/dlls/oleaut32/typelib.c
+index 517e515..bc332b0 100644
+--- a/dlls/oleaut32/typelib.c
++++ b/dlls/oleaut32/typelib.c
+@@ -4763,10 +4763,9 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
+     if (!ref)
+     {
+       TLBImpLib *pImpLib, *pImpLibNext;
+-      TLBRefType *ref_type;
++      TLBRefType *ref_type, *ref_type_next;
+       TLBString *tlbstr, *tlbstr_next;
+       TLBGuid *tlbguid, *tlbguid_next;
+-      void *cursor2;
+       int i;
+ 
+       /* remove cache entry */
+@@ -4816,7 +4815,7 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
+           heap_free(pImpLib);
+       }
+ 
+-      LIST_FOR_EACH_ENTRY_SAFE(ref_type, cursor2, &This->ref_list, TLBRefType, entry)
++      LIST_FOR_EACH_ENTRY_SAFE(ref_type, ref_type_next, &This->ref_list, TLBRefType, entry)
+       {
+           list_remove(&ref_type->entry);
+           heap_free(ref_type);
+-- 
+2.9.3
+
