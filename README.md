@@ -1,5 +1,6 @@
 # wine-patches
-Various wine patches mostly aimed at improving performance. May require CSMT patches (wine-staging).
+Various wine patches mostly aimed at improving performance that aren't in wine or wine-staging (yet?).
+May require CSMT patches (wine-staging).
 
 ### 0001-ntdll-improve-heap-allocation-performance.patch
 
@@ -10,7 +11,7 @@ allocator from ~30% CPU time to ~2%.
 
 ### 0003-ntdll-heap.c-align-everything-to-64-byte-to-reduce-f.patch
 
-Align allocated memory to 64 byte boundaries to lessen false-sharing issues. May increase RAM use.
+Align allocated memory to 64 byte boundaries to lessen false-sharing issues. May increase RAM usage.
 
 ### 0002-wined3d-use-SwitchToThread-and-calls-to-select-in-bu.patch
 Requires: CSMT patches.
