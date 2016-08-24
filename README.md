@@ -17,7 +17,7 @@ Align allocated memory to 64 byte boundaries to lessen false-sharing issues. May
 Requires: CSMT patches.
 
 Can reduce CPU usage when using the CSMT patchset by up to 50% or sometimes even more. Whether this translates into
-an FPS increase or an improvement in responsiveness depends on your OS and hardware.
+an FPS increase or an improvement in responsiveness depends on your OS and hardware (and game).
 
 ### 0004-wine-list.h-linked-list-cache-line-prefetching.patch, 0005-ntdll-heap.c-freelist_balance-prefetch-next-entry-ca.patch, 0006-oleaut32-typelib.c-fix-cursor2-having-the-wrong-type.patch
 Potentially doubles the speed at which linked-list can be traversed. Linked lists are used in many places in wine.
