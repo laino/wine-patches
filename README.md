@@ -9,6 +9,8 @@ Fixes Guild Wars 2 FPS decrease when it is running for a longer period of time a
 double the FPS in big fights (World Bosses, WvW, etc...) by reducing the overhead of the memory
 allocator from ~30% CPU time to ~2%.
 
+Don't use the "ntdll-Heap_FreeLists" patch from wine-staging when using this one (they have conflicting changes).
+
 ### 0003-ntdll-heap.c-align-everything-to-64-byte-to-reduce-f.patch
 
 Align allocated memory to 64 byte boundaries to lessen false-sharing issues. May increase RAM usage.
