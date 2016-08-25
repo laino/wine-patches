@@ -8,10 +8,10 @@ Subject: [PATCH 6/6] oleaut32/typelib.c: fix cursor2 having the wrong type
  1 file changed, 2 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/oleaut32/typelib.c b/dlls/oleaut32/typelib.c
-index 517e515..bc332b0 100644
+index 6f87279..99d9d24 100644
 --- a/dlls/oleaut32/typelib.c
 +++ b/dlls/oleaut32/typelib.c
-@@ -4763,10 +4763,9 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
+@@ -4749,10 +4749,9 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
      if (!ref)
      {
        TLBImpLib *pImpLib, *pImpLibNext;
@@ -23,7 +23,7 @@ index 517e515..bc332b0 100644
        int i;
  
        /* remove cache entry */
-@@ -4816,7 +4815,7 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
+@@ -4802,7 +4801,7 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
            heap_free(pImpLib);
        }
  
