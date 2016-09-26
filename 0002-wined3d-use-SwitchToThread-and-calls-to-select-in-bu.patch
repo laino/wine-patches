@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
 Date: Sat, 6 Aug 2016 16:25:27 +0200
-Subject: [PATCH 2/6] wined3d: use SwitchToThread() and calls to select() in
+Subject: [PATCH 2/7] wined3d: use SwitchToThread() and calls to select() in
  busy-loops
 
 ---
@@ -176,5 +176,5 @@ index 690d0cf..e33ddf4 100644
  struct wined3d_cs_queue
  {
 -- 
-2.9.3
+2.10.0
 

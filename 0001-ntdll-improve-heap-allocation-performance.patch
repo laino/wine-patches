@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
 Date: Fri, 19 Aug 2016 11:01:30 +0200
-Subject: [PATCH 1/6] ntdll: improve heap allocation performance
+Subject: [PATCH 1/7] ntdll: improve heap allocation performance
 
 - Automatically balancing free lists: It is impossible
   to tune free list sizes (manually) for every application, since
@@ -701,5 +701,5 @@ index f928ebf..e0ffdfe 100644
              HEAP_ShrinkBlock( newsubheap, pInUse, rounded_size );
  
 -- 
-2.9.3
+2.10.0
 

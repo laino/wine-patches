@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
 Date: Wed, 24 Aug 2016 19:56:00 +0200
-Subject: [PATCH 6/6] oleaut32/typelib.c: fix cursor2 having the wrong type
+Subject: [PATCH 6/7] oleaut32/typelib.c: fix cursor2 having the wrong type
 
 ---
  dlls/oleaut32/typelib.c | 5 ++---
@@ -33,5 +33,5 @@ index 4fdfbeb..a8d1b8c 100644
            list_remove(&ref_type->entry);
            heap_free(ref_type);
 -- 
-2.9.3
+2.10.0
 

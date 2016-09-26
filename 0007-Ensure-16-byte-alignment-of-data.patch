@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
+Date: Mon, 19 Sep 2016 19:53:24 +0200
+Subject: [PATCH 7/7] Ensure 16 byte alignment of data
+
+---
+ dlls/ntdll/heap.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/ntdll/heap.c b/dlls/ntdll/heap.c
+index 57d3d54..5469b6f 100644
+--- a/dlls/ntdll/heap.c
++++ b/dlls/ntdll/heap.c
+@@ -54,8 +54,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(heap);
+ typedef struct tagARENA_INUSE
+ {
+     DWORD  size;                    /* Block size; must be the first field */
+-    DWORD  magic : 24;              /* Magic number */
+-    DWORD  unused_bytes : 8;        /* Number of bytes in the block not used by user data (max value is HEAP_MIN_DATA_SIZE+HEAP_MIN_SHRINK_SIZE) */
++    DWORD  magic;                   /* Magic number */
++    DWORD  unused_bytes;            /* Number of bytes in the block not used by user data (max value is HEAP_MIN_DATA_SIZE+HEAP_MIN_SHRINK_SIZE) */
++    DWORD  padding;
+ } ARENA_INUSE;
+ 
+ typedef struct tagARENA_FREE
+@@ -92,9 +93,11 @@ typedef struct
+ 
+ /* everything is aligned on 64 byte boundaries */
+ #define ALIGNMENT              64
++#define HEADER_ALIGNMENT       16
+ #define LARGE_ALIGNMENT        16  /* large blocks have stricter alignment */
+ 
+-C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
++C_ASSERT( sizeof(ARENA_LARGE) % HEADER_ALIGNMENT == 0 );
++C_ASSERT( sizeof(ARENA_INUSE) % HEADER_ALIGNMENT == 0 );
+ 
+ #define ROUND_SIZE(size)       ((size + ALIGNMENT - 1) & ~(ALIGNMENT - 1))
+ #define ROUND_DATA_SIZE(size)  (((size + sizeof(ARENA_INUSE) + ALIGNMENT - 1) \
+-- 
+2.10.0
+
