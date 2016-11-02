@@ -114,7 +114,7 @@ index c925df9..008543e 100644
          tail = queue->tail;
          opcode = *(const enum wined3d_cs_op *)&queue->data[tail];
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 2e1034c..8a12251 100644
+index 754c2aa..12a6056 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
 @@ -2711,9 +2711,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
@@ -176,5 +176,5 @@ index 2e1034c..8a12251 100644
  struct wined3d_cs_queue
  {
 -- 
-2.10.0
+2.10.1
 
