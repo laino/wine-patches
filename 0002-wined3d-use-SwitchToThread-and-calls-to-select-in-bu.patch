@@ -176,5 +176,5 @@ index 754c2aa..12a6056 100644
  struct wined3d_cs_queue
  {
 -- 
-2.10.1
+2.10.2
 
