@@ -114,10 +114,10 @@ index c925df9..008543e 100644
          tail = queue->tail;
          opcode = *(const enum wined3d_cs_op *)&queue->data[tail];
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 754c2aa..12a6056 100644
+index 86e5e85..1178bde 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -2711,9 +2711,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
+@@ -2713,9 +2713,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
      InterlockedDecrement(&resource->access_count);
  }
  
@@ -166,7 +166,7 @@ index 754c2aa..12a6056 100644
  }
  
  void resource_cleanup(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
-@@ -3205,7 +3243,7 @@ struct wined3d_cs_list
+@@ -3209,7 +3247,7 @@ struct wined3d_cs_list
  };
  
  #define WINED3D_CS_QUEUE_SIZE 0x100000
