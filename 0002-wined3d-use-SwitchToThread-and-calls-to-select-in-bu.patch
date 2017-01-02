@@ -10,7 +10,7 @@ Subject: [PATCH 2/7] wined3d: use SwitchToThread() and calls to select() in
  2 files changed, 71 insertions(+), 10 deletions(-)
 
 diff --git a/dlls/wined3d/cs.c b/dlls/wined3d/cs.c
-index c55afad..bad97f8 100644
+index c55afad8fb..bad97f87c9 100644
 --- a/dlls/wined3d/cs.c
 +++ b/dlls/wined3d/cs.c
 @@ -665,6 +665,8 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
@@ -114,10 +114,10 @@ index c55afad..bad97f8 100644
          tail = queue->tail;
          opcode = *(const enum wined3d_cs_op *)&queue->data[tail];
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 148e523..358929b 100644
+index fc7110b073..9bf5fd9c96 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -2774,9 +2774,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
+@@ -2778,9 +2778,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
      InterlockedDecrement(&resource->access_count);
  }
  
@@ -166,7 +166,7 @@ index 148e523..358929b 100644
  }
  
  void resource_cleanup(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
-@@ -3270,7 +3308,7 @@ struct wined3d_cs_list
+@@ -3274,7 +3312,7 @@ struct wined3d_cs_list
  };
  
  #define WINED3D_CS_QUEUE_SIZE 0x100000
@@ -176,5 +176,5 @@ index 148e523..358929b 100644
  struct wined3d_cs_queue
  {
 -- 
-2.10.2
+2.11.0
 

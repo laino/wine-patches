@@ -8,7 +8,7 @@ Subject: [PATCH 4/7] wine/list.h: linked list cache line prefetching
  1 file changed, 20 insertions(+), 16 deletions(-)
 
 diff --git a/include/wine/list.h b/include/wine/list.h
-index b4d681f..49b1e23 100644
+index b4d681fe0f..49b1e23a39 100644
 --- a/include/wine/list.h
 +++ b/include/wine/list.h
 @@ -105,7 +105,8 @@ static inline void list_remove( struct list *elem )
@@ -100,5 +100,5 @@ index b4d681f..49b1e23 100644
  /* macros for statically initialized lists */
  #undef LIST_INIT
 -- 
-2.10.2
+2.11.0
 

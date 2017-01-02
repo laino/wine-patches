@@ -8,7 +8,7 @@ Subject: [PATCH 6/7] oleaut32/typelib.c: fix cursor2 having the wrong type
  1 file changed, 2 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/oleaut32/typelib.c b/dlls/oleaut32/typelib.c
-index 4fdfbeb..a8d1b8c 100644
+index 4fdfbeb544..a8d1b8cf6e 100644
 --- a/dlls/oleaut32/typelib.c
 +++ b/dlls/oleaut32/typelib.c
 @@ -4749,10 +4749,9 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
@@ -33,5 +33,5 @@ index 4fdfbeb..a8d1b8c 100644
            list_remove(&ref_type->entry);
            heap_free(ref_type);
 -- 
-2.10.2
+2.11.0
 

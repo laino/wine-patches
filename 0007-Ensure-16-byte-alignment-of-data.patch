@@ -8,7 +8,7 @@ Subject: [PATCH 7/7] Ensure 16 byte alignment of data
  1 file changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/ntdll/heap.c b/dlls/ntdll/heap.c
-index 57d3d54..5469b6f 100644
+index 57d3d544e5..5469b6fc55 100644
 --- a/dlls/ntdll/heap.c
 +++ b/dlls/ntdll/heap.c
 @@ -54,8 +54,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(heap);
@@ -37,5 +37,5 @@ index 57d3d54..5469b6f 100644
  #define ROUND_SIZE(size)       ((size + ALIGNMENT - 1) & ~(ALIGNMENT - 1))
  #define ROUND_DATA_SIZE(size)  (((size + sizeof(ARENA_INUSE) + ALIGNMENT - 1) \
 -- 
-2.10.2
+2.11.0
 

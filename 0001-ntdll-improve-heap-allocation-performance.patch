@@ -34,7 +34,7 @@ Signed-off-by: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
  1 file changed, 373 insertions(+), 83 deletions(-)
 
 diff --git a/dlls/ntdll/heap.c b/dlls/ntdll/heap.c
-index f928ebf..e0ffdfe 100644
+index f928ebff50..e0ffdfec99 100644
 --- a/dlls/ntdll/heap.c
 +++ b/dlls/ntdll/heap.c
 @@ -105,7 +105,8 @@ C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
@@ -701,5 +701,5 @@ index f928ebf..e0ffdfe 100644
              HEAP_ShrinkBlock( newsubheap, pInUse, rounded_size );
  
 -- 
-2.10.2
+2.11.0
 
