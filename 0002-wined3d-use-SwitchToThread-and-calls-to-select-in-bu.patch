@@ -10,7 +10,7 @@ Subject: [PATCH 2/7] wined3d: use SwitchToThread() and calls to select() in
  2 files changed, 71 insertions(+), 10 deletions(-)
 
 diff --git a/dlls/wined3d/cs.c b/dlls/wined3d/cs.c
-index c55afad8fb..bad97f87c9 100644
+index 05acb1a47d..a44608c534 100644
 --- a/dlls/wined3d/cs.c
 +++ b/dlls/wined3d/cs.c
 @@ -665,6 +665,8 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
@@ -33,7 +33,7 @@ index c55afad8fb..bad97f87c9 100644
  }
  
  static UINT wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
-@@ -3496,17 +3501,25 @@ static void wined3d_cs_emit_stop(struct wined3d_cs *cs)
+@@ -3405,17 +3410,25 @@ static void wined3d_cs_emit_stop(struct wined3d_cs *cs)
  static void wined3d_cs_mt_finish(struct wined3d_cs *cs)
  {
      BOOL fence;
@@ -60,7 +60,7 @@ index c55afad8fb..bad97f87c9 100644
      if (cs->thread_id == GetCurrentThreadId())
      {
          static BOOL once;
-@@ -3522,7 +3535,8 @@ static void wined3d_cs_mt_finish_prio(struct wined3d_cs *cs)
+@@ -3431,7 +3444,8 @@ static void wined3d_cs_mt_finish_prio(struct wined3d_cs *cs)
  
      /* A busy wait should be fine, we're not supposed to have to wait very
       * long. */
@@ -70,7 +70,7 @@ index c55afad8fb..bad97f87c9 100644
  }
  
  static const struct wined3d_cs_ops wined3d_cs_mt_ops =
-@@ -3640,7 +3654,11 @@ static DWORD WINAPI wined3d_cs_run(void *thread_param)
+@@ -3555,7 +3569,11 @@ static DWORD WINAPI wined3d_cs_run(void *thread_param)
      LONG tail;
      char poll = 0;
      struct wined3d_cs_queue *queue;
@@ -83,7 +83,7 @@ index c55afad8fb..bad97f87c9 100644
  
      TRACE("Started.\n");
  
-@@ -3663,19 +3681,24 @@ static DWORD WINAPI wined3d_cs_run(void *thread_param)
+@@ -3578,19 +3596,24 @@ static DWORD WINAPI wined3d_cs_run(void *thread_param)
          else if (!queue_is_empty(&cs->queue))
          {
              queue = &cs->queue;
@@ -114,10 +114,10 @@ index c55afad8fb..bad97f87c9 100644
          tail = queue->tail;
          opcode = *(const enum wined3d_cs_op *)&queue->data[tail];
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index fc7110b073..9bf5fd9c96 100644
+index e109cc680e..d3d0ddc582 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -2778,9 +2778,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
+@@ -2788,9 +2788,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
      InterlockedDecrement(&resource->access_count);
  }
  
@@ -166,7 +166,7 @@ index fc7110b073..9bf5fd9c96 100644
  }
  
  void resource_cleanup(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
-@@ -3274,7 +3312,7 @@ struct wined3d_cs_list
+@@ -3284,7 +3322,7 @@ struct wined3d_cs_list
  };
  
  #define WINED3D_CS_QUEUE_SIZE 0x100000
