@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
 Date: Wed, 24 Aug 2016 19:45:02 +0200
-Subject: [PATCH 5/7] ntdll/heap.c: freelist_balance - prefetch next entry
+Subject: [PATCH 4/7] ntdll/heap.c: freelist_balance - prefetch next entry
  cache line
 
 ---
@@ -21,5 +21,5 @@ index d59f3c8414..57d3d544e5 100644
          pArena = LIST_ENTRY( ptr, ARENA_FREE, entry );
  
 -- 
-2.11.0
+2.11.1
 

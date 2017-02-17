@@ -1,17 +1,17 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
 Date: Wed, 24 Aug 2016 19:56:00 +0200
-Subject: [PATCH 6/7] oleaut32/typelib.c: fix cursor2 having the wrong type
+Subject: [PATCH 5/7] oleaut32/typelib.c: fix cursor2 having the wrong type
 
 ---
  dlls/oleaut32/typelib.c | 5 ++---
  1 file changed, 2 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/oleaut32/typelib.c b/dlls/oleaut32/typelib.c
-index 4fdfbeb544..a8d1b8cf6e 100644
+index 1c00d715f4..247d383ff7 100644
 --- a/dlls/oleaut32/typelib.c
 +++ b/dlls/oleaut32/typelib.c
-@@ -4749,10 +4749,9 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
+@@ -4725,10 +4725,9 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
      if (!ref)
      {
        TLBImpLib *pImpLib, *pImpLibNext;
@@ -23,7 +23,7 @@ index 4fdfbeb544..a8d1b8cf6e 100644
        int i;
  
        /* remove cache entry */
-@@ -4802,7 +4801,7 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
+@@ -4778,7 +4777,7 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
            heap_free(pImpLib);
        }
  
@@ -33,5 +33,5 @@ index 4fdfbeb544..a8d1b8cf6e 100644
            list_remove(&ref_type->entry);
            heap_free(ref_type);
 -- 
-2.11.0
+2.11.1
 

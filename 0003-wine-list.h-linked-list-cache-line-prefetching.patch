@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
 Date: Wed, 24 Aug 2016 19:44:37 +0200
-Subject: [PATCH 4/7] wine/list.h: linked list cache line prefetching
+Subject: [PATCH 3/7] wine/list.h: linked list cache line prefetching
 
 ---
  include/wine/list.h | 36 ++++++++++++++++++++----------------
@@ -100,5 +100,5 @@ index b4d681fe0f..49b1e23a39 100644
  /* macros for statically initialized lists */
  #undef LIST_INIT
 -- 
-2.11.0
+2.11.1
 
