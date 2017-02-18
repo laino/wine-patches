@@ -5,21 +5,18 @@ Subject: [PATCH 7/7] wined3d: use SwitchToThread() and calls to select() in
  busy-loops
 
 ---
- dlls/wined3d/wined3d_private.h | 43 +++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 42 insertions(+), 1 deletion(-)
+ dlls/wined3d/wined3d_private.h | 40 +++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 39 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 54adf26b4d..58ed50a967 100644
+index 4c70c970bc..0cd0b11e88 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -2741,9 +2741,50 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
+@@ -2741,9 +2741,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
      InterlockedDecrement(&resource->access_count);
  }
  
 +#if defined(STAGING_CSMT)
-+#define WINED3D_CS_QUEUE_SIZE 0x100000
-+#define WINED3D_CS_SPIN_TIME  200000 /* 20000 = 20 milliseconds */
-+
 +#define WINED3D_YIELD_SPIN_TIME  1000 /* 1000 = 0.1 milliseconds = 100 microseconds */
 +
 +static LARGE_INTEGER wined3d_cs_mt_yield(LARGE_INTEGER *spin_start)
