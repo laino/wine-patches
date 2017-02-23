@@ -9,10 +9,10 @@ Subject: [PATCH 7/7] wined3d: use SwitchToThread() and calls to select() in
  1 file changed, 39 insertions(+), 1 deletion(-)
 
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 4c70c970bc..0cd0b11e88 100644
+index 087e4d24a5..537d76ff55 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -2741,9 +2741,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
+@@ -2752,9 +2752,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
      InterlockedDecrement(&resource->access_count);
  }
  
