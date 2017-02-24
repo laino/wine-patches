@@ -1,22 +1,71 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
-Date: Sat, 6 Aug 2016 16:25:27 +0200
-Subject: [PATCH 7/7] wined3d: use SwitchToThread() and calls to select() in
+Date: Fri, 24 Feb 2017 02:18:48 +0100
+Subject: [PATCH] wined3d: use SwitchToThread() and calls to select() in
  busy-loops
 
 ---
- dlls/wined3d/wined3d_private.h | 40 +++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 39 insertions(+), 1 deletion(-)
+ dlls/wined3d/cs.c              | 14 +++++++++++-
+ dlls/wined3d/wined3d_private.h | 52 ++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 63 insertions(+), 3 deletions(-)
 
+diff --git a/dlls/wined3d/cs.c b/dlls/wined3d/cs.c
+index 585ada71f4..1aedc04279 100644
+--- a/dlls/wined3d/cs.c
++++ b/dlls/wined3d/cs.c
+@@ -596,6 +596,9 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
+ 
+ static void wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
+ #else  /* STAGING_CSMT */
++    LARGE_INTEGER spin_start;
++    spin_start.QuadPart = 0;
++
+     pending = InterlockedIncrement(&cs->pending_presents);
+ 
+     cs->ops->submit(cs);
+@@ -609,7 +612,10 @@ static void wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
+      * In Counter-Strike: Source a frame difference of 3 causes noticable
+      * input delay that makes the game unplayable. */
+     while (pending > 1)
++    {
++        wined3d_cs_mt_yield(&spin_start);
+         pending = InterlockedCompareExchange(&cs->pending_presents, 0, 0);
++    }
+ }
+ 
+ static UINT wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
+@@ -3395,8 +3401,11 @@ static void wined3d_cs_mt_submit(struct wined3d_cs *cs)
+ static void wined3d_cs_mt_submit_and_wait(struct wined3d_cs *cs)
+ {
+     struct wined3d_cs_block *block;
++    LARGE_INTEGER spin_start;
+     BOOL fence = FALSE;
+ 
++    spin_start.QuadPart = 0;
++
+     if (cs->thread_id == GetCurrentThreadId())
+         return wined3d_cs_st_submit(cs);
+ 
+@@ -3410,7 +3419,10 @@ static void wined3d_cs_mt_submit_and_wait(struct wined3d_cs *cs)
+ 
+     /* A busy wait should be fine, we're not supposed to have to wait very
+      * long. */
+-    while (!InterlockedCompareExchange(&fence, TRUE, TRUE));
++    while (!InterlockedCompareExchange(&fence, TRUE, TRUE))
++    {
++        wined3d_cs_mt_yield(&spin_start);
++    }
+ }
+ 
+ static void wined3d_cs_mt_submit_delayed(struct wined3d_cs *cs)
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 087e4d24a5..537d76ff55 100644
+index 6b783aac0f..541cf0195a 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -2752,9 +2752,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
+@@ -2832,10 +2832,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
      InterlockedDecrement(&resource->access_count);
  }
  
-+#if defined(STAGING_CSMT)
 +#define WINED3D_YIELD_SPIN_TIME  1000 /* 1000 = 0.1 milliseconds = 100 microseconds */
 +
 +static LARGE_INTEGER wined3d_cs_mt_yield(LARGE_INTEGER *spin_start)
@@ -42,7 +91,8 @@ index 087e4d24a5..537d76ff55 100644
 +
 +    return diff;
 +}
-+#endif /* STAGING_CSMT */
++
+ #if !defined(STAGING_CSMT)
 +
  static inline void wined3d_resource_wait_idle(struct wined3d_resource *resource)
  {
@@ -60,7 +110,28 @@ index 087e4d24a5..537d76ff55 100644
 +    }
  }
  
- void resource_cleanup(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
+ #endif /* STAGING_CSMT */
+@@ -3344,8 +3381,19 @@ struct wined3d_cs
+ 
+ static inline void wined3d_resource_wait_idle(struct wined3d_resource *resource)
+ {
++#if defined(STAGING_CSMT)
++    LARGE_INTEGER spin_start;
++    spin_start.QuadPart = 0;
++#endif /* STAGING_CSMT */
++
+     if (resource->device->cs->thread_id == GetCurrentThreadId()) return;
+-    while (InterlockedCompareExchange(&resource->access_count, 0, 0));
++
++    while (InterlockedCompareExchange(&resource->access_count, 0, 0))
++    {
++#if defined(STAGING_CSMT)
++        wined3d_cs_mt_yield(&spin_start);
++#endif /* STAGING_CSMT */
++    }
+ }
+ #endif /* STAGING_CSMT */
+ 
 -- 
 2.11.1
 
