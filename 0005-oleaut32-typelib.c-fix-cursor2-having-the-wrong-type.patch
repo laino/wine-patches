@@ -33,5 +33,5 @@ index 1c00d715f4..247d383ff7 100644
            list_remove(&ref_type->entry);
            heap_free(ref_type);
 -- 
-2.11.1
+2.12.0
 

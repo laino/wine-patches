@@ -100,5 +100,5 @@ index b4d681fe0f..49b1e23a39 100644
  /* macros for statically initialized lists */
  #undef LIST_INIT
 -- 
-2.11.1
+2.12.0
 
