@@ -10,10 +10,10 @@ Subject: [PATCH 7/7] wined3d: use SwitchToThread() and calls to select() in
  2 files changed, 63 insertions(+), 3 deletions(-)
 
 diff --git a/dlls/wined3d/cs.c b/dlls/wined3d/cs.c
-index df1280f604..39b4082612 100644
+index 683cf91c6b..9b5115d1a4 100644
 --- a/dlls/wined3d/cs.c
 +++ b/dlls/wined3d/cs.c
-@@ -579,6 +579,9 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
+@@ -555,6 +555,9 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
  
  static void wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
  #else  /* STAGING_CSMT */
@@ -23,7 +23,7 @@ index df1280f604..39b4082612 100644
      pending = InterlockedIncrement(&cs->pending_presents);
  
      cs->ops->submit(cs);
-@@ -592,7 +595,10 @@ static void wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
+@@ -568,7 +571,10 @@ static void wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
       * In Counter-Strike: Source a frame difference of 3 causes noticable
       * input delay that makes the game unplayable. */
      while (pending > 1)
@@ -34,7 +34,7 @@ index df1280f604..39b4082612 100644
  }
  
  static UINT wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
-@@ -3272,8 +3278,11 @@ static void wined3d_cs_mt_submit(struct wined3d_cs *cs)
+@@ -3126,8 +3132,11 @@ static void wined3d_cs_mt_submit(struct wined3d_cs *cs)
  static void wined3d_cs_mt_submit_and_wait(struct wined3d_cs *cs)
  {
      struct wined3d_cs_block *block;
@@ -46,7 +46,7 @@ index df1280f604..39b4082612 100644
      if (cs->thread_id == GetCurrentThreadId())
          return wined3d_cs_st_submit(cs);
  
-@@ -3287,7 +3296,10 @@ static void wined3d_cs_mt_submit_and_wait(struct wined3d_cs *cs)
+@@ -3141,7 +3150,10 @@ static void wined3d_cs_mt_submit_and_wait(struct wined3d_cs *cs)
  
      /* A busy wait should be fine, we're not supposed to have to wait very
       * long. */
@@ -59,10 +59,10 @@ index df1280f604..39b4082612 100644
  
  static void wined3d_cs_mt_submit_delayed(struct wined3d_cs *cs)
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 541c9353d4..94a5b8d958 100644
+index d0188971af..79b6f0401d 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -2802,10 +2802,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
+@@ -2817,10 +2817,47 @@ static inline void wined3d_resource_release(struct wined3d_resource *resource)
      InterlockedDecrement(&resource->access_count);
  }
  
