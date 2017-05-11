@@ -1,15 +1,15 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
 Date: Thu, 27 Apr 2017 19:21:23 +0200
-Subject: [PATCH 7/7] wined3d: use select in wined3d_pause();
+Subject: [PATCH 7/7] wined3d: use SwitchToThread() in wined3d_pause();
 
 ---
  dlls/wined3d/cs.c              | 4 +++-
- dlls/wined3d/wined3d_private.h | 7 ++++---
- 2 files changed, 7 insertions(+), 4 deletions(-)
+ dlls/wined3d/wined3d_private.h | 3 ++-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
 
 diff --git a/dlls/wined3d/cs.c b/dlls/wined3d/cs.c
-index 033756ea10..690eb0a83f 100644
+index 033756ea10..46a200bfd1 100644
 --- a/dlls/wined3d/cs.c
 +++ b/dlls/wined3d/cs.c
 @@ -506,8 +506,10 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
@@ -18,30 +18,26 @@ index 033756ea10..690eb0a83f 100644
       * input delay that makes the game unplayable. */
 -    while (pending > 1)
 +    while (pending > 1) {
-         pending = InterlockedCompareExchange(&cs->pending_presents, 0, 0);
 +        wined3d_pause();
+         pending = InterlockedCompareExchange(&cs->pending_presents, 0, 0);
 +    }
  #endif /* STAGING_CSMT */
  }
  
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index ed8e2f0687..829c2e967d 100644
+index ed8e2f0687..11d7226c93 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
-@@ -364,9 +364,10 @@ static inline unsigned int wined3d_popcount(unsigned int x)
- 
+@@ -365,7 +365,8 @@ static inline unsigned int wined3d_popcount(unsigned int x)
  static inline void wined3d_pause(void)
  {
--#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+ #if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
 -    __asm__ __volatile__( "rep;nop" : : : "memory" );
--#endif
-+    struct timeval tv;
-+    tv.tv_sec = 0;
-+    tv.tv_usec = 9;
-+    select( 0, NULL, NULL, NULL, &tv);
++    SwitchToThread();
++    //__asm__ __volatile__( "rep;nop" : : : "memory" );
+ #endif
  }
  
- #define ORM_BACKBUFFER  0
 -- 
 2.12.2
 
