@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nils Kuhnhenn <kuhnhenn.nils@gmail.com>
+Date: Thu, 27 Apr 2017 19:21:23 +0200
+Subject: [PATCH 7/7] wined3d: use SwitchToThread()/waits in wined3d_pause()
+
+---
+ dlls/wined3d/cs.c              | 11 ++++++++---
+ dlls/wined3d/wined3d_private.h | 31 ++++++++++++++++++++++++++-----
+ 2 files changed, 34 insertions(+), 8 deletions(-)
+
+diff --git a/dlls/wined3d/cs.c b/dlls/wined3d/cs.c
+index fc38929996..5f8f9b1f56 100644
+--- a/dlls/wined3d/cs.c
++++ b/dlls/wined3d/cs.c
+@@ -473,9 +473,10 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
+     /* Limit input latency by limiting the number of presents that we can get
+      * ahead of the worker thread. We have a constant limit here, but
+      * IDXGIDevice1 allows tuning this. */
++    i = 0;
+     while (pending > 1)
+     {
+-        wined3d_pause();
++        wined3d_pause(i++);
+         pending = InterlockedCompareExchange(&cs->pending_presents, 0, 0);
+     }
+ }
+@@ -2658,6 +2659,8 @@ static void *wined3d_cs_mt_require_space(struct wined3d_cs *cs, size_t size, int
+ 
+ static void wined3d_cs_mt_finish(struct wined3d_cs *cs)
+ {
++    int i = 0;
++
+     if (cs->thread_id == GetCurrentThreadId())
+         return wined3d_cs_st_finish(cs);
+ 
+@@ -2665,10 +2668,12 @@ static void wined3d_cs_mt_finish(struct wined3d_cs *cs)
+     while (!wined3d_cs_queue_is_empty(&cs->queue))
+ #else  /* STAGING_CSMT */
+     while (!wined3d_cs_queue_is_empty(&cs->prio_queue))
+-        wined3d_pause();
++        wined3d_pause(i++);
++
++    i = 0;
+     while (!wined3d_cs_queue_is_empty(&cs->norm_queue))
+ #endif /* STAGING_CSMT */
+-        wined3d_pause();
++        wined3d_pause(i++);
+ }
+ 
+ static const struct wined3d_cs_ops wined3d_cs_mt_ops =
+diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
+index 0dd61e71a3..aee339a689 100644
+--- a/dlls/wined3d/wined3d_private.h
++++ b/dlls/wined3d/wined3d_private.h
+@@ -362,11 +362,31 @@ static inline unsigned int wined3d_popcount(unsigned int x)
+ #endif
+ }
+ 
+-static inline void wined3d_pause(void)
++static struct timeval wined3d_pause1_timeval = (struct timeval) {0, 10}; // 0.00001 seconds
++static struct timeval wined3d_pause2_timeval = (struct timeval) {0, 100}; // 0.0001 seconds
++static struct timeval wined3d_pause3_timeval = (struct timeval) {0, 1000}; // 0.001 seconds
++
++static inline void wined3d_pause(unsigned int i)
+ {
+-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+-    __asm__ __volatile__( "rep;nop" : : : "memory" );
+-#endif
++    if (i < 50)
++    {
++        SwitchToThread();
++        return;
++    }
++    
++    if (i < 100)
++    {
++        select(0, 0, 0, 0, &wined3d_pause1_timeval);
++        return;
++    }
++
++    if (i < 200)
++    {
++        select(0, 0, 0, 0, &wined3d_pause2_timeval);
++        return;
++    }
++        
++    select(0, 0, 0, 0, &wined3d_pause3_timeval);
+ }
+ 
+ #define ORM_BACKBUFFER  0
+@@ -3402,12 +3422,13 @@ static inline void wined3d_cs_push_constants(struct wined3d_cs *cs, enum wined3d
+ static inline void wined3d_resource_wait_idle(struct wined3d_resource *resource)
+ {
+     const struct wined3d_cs *cs = resource->device->cs;
++    int i = 0;
+ 
+     if (!cs->thread || cs->thread_id == GetCurrentThreadId())
+         return;
+ 
+     while (InterlockedCompareExchange(&resource->access_count, 0, 0))
+-        wined3d_pause();
++        wined3d_pause(i++);
+ }
+ 
+ /* TODO: Add tests and support for FLOAT16_4 POSITIONT, D3DCOLOR position, other
+-- 
+2.12.2
+

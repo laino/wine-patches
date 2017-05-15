@@ -21,7 +21,7 @@ Patch 0005 is only needed if you are also using the heap allocation patch (0001)
 ### 0006-Ensure-16-byte-alignment-of-data.patch
 Align data in allocated memory to 16 byte byte boundaries.
 
-### 0007-wined3d-use-SwitchToThread-and-calls-to-select-in-bu.patch
+### 0007-wined3d-use-SwitchToThread-waits-in-wined3d_pause.patch
 Requires: CSMT patches.
 
 Can reduce CPU usage when using the CSMT patchset by up to 50% or sometimes even more. Whether this translates into
