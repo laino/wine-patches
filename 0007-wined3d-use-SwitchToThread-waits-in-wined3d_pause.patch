@@ -49,7 +49,7 @@ index fc38929996..5f8f9b1f56 100644
  
  static const struct wined3d_cs_ops wined3d_cs_mt_ops =
 diff --git a/dlls/wined3d/wined3d_private.h b/dlls/wined3d/wined3d_private.h
-index 0dd61e71a3..aee339a689 100644
+index 0dd61e71a3..f1fb6fc822 100644
 --- a/dlls/wined3d/wined3d_private.h
 +++ b/dlls/wined3d/wined3d_private.h
 @@ -362,11 +362,31 @@ static inline unsigned int wined3d_popcount(unsigned int x)
@@ -57,9 +57,9 @@ index 0dd61e71a3..aee339a689 100644
  }
  
 -static inline void wined3d_pause(void)
-+static struct timeval wined3d_pause1_timeval = (struct timeval) {0, 10}; // 0.00001 seconds
-+static struct timeval wined3d_pause2_timeval = (struct timeval) {0, 100}; // 0.0001 seconds
-+static struct timeval wined3d_pause3_timeval = (struct timeval) {0, 1000}; // 0.001 seconds
++static struct timeval wined3d_pause1_timeval = {0, 10}; // 0.00001 seconds
++static struct timeval wined3d_pause2_timeval = {0, 100}; // 0.0001 seconds
++static struct timeval wined3d_pause3_timeval = {0, 1000}; // 0.001 seconds
 +
 +static inline void wined3d_pause(unsigned int i)
  {
